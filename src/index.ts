@@ -5,10 +5,34 @@
  */
 
 import type { Page } from '@playwright/test';
-import type { AuthConfig, InjectAuthOptions } from './types.js';
+import type {
+  AuthConfig,
+  FirebaseConfig,
+  SupabaseConfig,
+  InjectAuthOptions,
+  Provider,
+} from './types.js';
 import { loadConfig } from './config.js';
 import { injectFirebaseAuth } from './firebase.js';
 import { ConfigInvalidError } from './errors.js';
+
+/** Provider handler function type */
+type ProviderHandler = (
+  page: Page,
+  config: FirebaseConfig | SupabaseConfig,
+  options: { debug?: boolean; waitAfter?: number }
+) => Promise<void>;
+
+/** Provider registry */
+const providers: Record<Provider, ProviderHandler> = {
+  firebase: injectFirebaseAuth as ProviderHandler,
+  supabase: async () => {
+    throw new ConfigInvalidError(
+      'Supabase is not yet implemented. Please use Firebase.',
+      'provider'
+    );
+  },
+};
 
 // Re-export types
 export type {
@@ -82,47 +106,34 @@ export async function injectAuth(
   page: Page,
   options: InjectAuthOptions = {}
 ): Promise<void> {
-  // Load config
   const config = await loadConfig();
 
-  // Override config if profile is specified
-  let effectiveConfig = config;
-  if (options.profile && config.profiles?.[options.profile]) {
-    const profileOverride = config.profiles[options.profile];
-    effectiveConfig = {
-      ...config,
-      firebase: config.firebase
-        ? { ...config.firebase, ...profileOverride }
-        : undefined,
-      supabase: config.supabase
-        ? { ...config.supabase, ...profileOverride }
-        : undefined,
-    };
+  // Get handler for the specified provider
+  const handler = providers[config.provider];
+  if (!handler) {
+    throw new ConfigInvalidError(
+      `Unsupported provider: ${config.provider}`,
+      'provider'
+    );
   }
 
-  // Execute authentication based on provider
-  switch (effectiveConfig.provider) {
-    case 'firebase':
-      if (!effectiveConfig.firebase) {
-        throw new ConfigInvalidError('firebase config is required', 'firebase');
-      }
-      await injectFirebaseAuth(page, effectiveConfig.firebase, {
-        debug: effectiveConfig.debug,
-        waitAfter: options.waitAfter,
-      });
-      break;
-
-    case 'supabase':
-      // TODO: Implement Supabase
-      throw new ConfigInvalidError(
-        'Supabase is not yet implemented. Please use Firebase.',
-        'provider'
-      );
-
-    default:
-      throw new ConfigInvalidError(
-        `Unsupported provider: ${effectiveConfig.provider}`,
-        'provider'
-      );
+  // Get provider-specific config
+  const providerConfig = config[config.provider];
+  if (!providerConfig) {
+    throw new ConfigInvalidError(
+      `${config.provider} config is required`,
+      config.provider
+    );
   }
+
+  // Apply profile override only to the active provider
+  const effectiveConfig =
+    options.profile && config.profiles?.[options.profile]
+      ? { ...providerConfig, ...config.profiles[options.profile] }
+      : providerConfig;
+
+  await handler(page, effectiveConfig, {
+    debug: config.debug,
+    waitAfter: options.waitAfter,
+  });
 }
