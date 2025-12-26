@@ -1,46 +1,25 @@
-/**
- * Base interface for authentication providers
- *
- * To add a new provider:
- * 1. Create a new class implementing AuthProvider<YourConfig>
- * 2. Implement validateConfig() to validate provider-specific config
- * 3. Implement inject() to handle the authentication injection
- * 4. Register in src/providers/index.ts
- */
-
-import type { Page } from '@playwright/test';
-import type { Provider } from '../types.js';
-
-/** Options passed to inject method */
-export interface InjectOptions {
-  debug?: boolean;
-  waitAfter?: number;
-}
+import type { Page } from "@playwright/test";
 
 /**
- * Authentication provider interface
+ * Base interface for all authentication providers.
  *
- * @typeParam TConfig - Provider-specific configuration type
+ * Each provider implements its specific authentication strategy:
+ * - Firebase: CDN injection + signInWithCustomToken
+ * - Supabase: API call + localStorage injection
+ *
+ * The provider is responsible for:
+ * 1. Executing the authentication flow
+ * 2. Setting auth state (Cookie/IndexedDB/localStorage) in the browser
+ *
+ * The caller is responsible for:
+ * 1. Saving the storage state via context.storageState()
  */
-export interface AuthProvider<TConfig> {
-  /** Provider identifier */
-  readonly name: Provider;
-
+export interface AuthProvider {
   /**
-   * Validate provider-specific configuration
+   * Execute authentication and set auth state in the browser context.
    *
-   * @param config - Raw config object to validate
-   * @returns Validated and typed config
-   * @throws ConfigInvalidError if validation fails
+   * @param page - Playwright Page instance with an active browser context
+   * @throws Error if authentication fails
    */
-  validateConfig(config: unknown): TConfig;
-
-  /**
-   * Inject authentication state into the browser
-   *
-   * @param page - Playwright Page object
-   * @param config - Validated provider config
-   * @param options - Injection options
-   */
-  inject(page: Page, config: TConfig, options: InjectOptions): Promise<void>;
+  signIn(page: Page): Promise<void>;
 }

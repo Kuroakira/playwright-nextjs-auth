@@ -1,105 +1,149 @@
-/**
- * Type definitions
- */
+import type { Page } from "@playwright/test";
 
-/** Supported providers */
-export type Provider = 'firebase' | 'supabase';
+// =============================================================================
+// Provider Types
+// =============================================================================
 
-/** Main configuration */
-export interface AuthConfig {
-  /** Provider to use */
-  provider: Provider;
+export type ProviderType = "firebase" | "supabase";
 
-  /** Firebase configuration */
+// =============================================================================
+// Test User Configuration
+// =============================================================================
+
+export interface TestUser {
+  /** User email address */
+  email?: string;
+  /** User password (for Supabase email/password auth) */
+  password?: string;
+  /** User UID (for Firebase custom token) */
+  uid?: string;
+}
+
+// =============================================================================
+// Firebase Configuration
+// =============================================================================
+
+export interface FirebaseServiceAccount {
+  type: string;
+  project_id: string;
+  private_key_id: string;
+  private_key: string;
+  client_email: string;
+  client_id: string;
+  auth_uri: string;
+  token_uri: string;
+  auth_provider_x509_cert_url: string;
+  client_x509_cert_url: string;
+  universe_domain?: string;
+}
+
+export interface FirebaseClientConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+}
+
+export interface FirebaseConfig {
+  serviceAccount: FirebaseServiceAccount;
+  clientConfig: FirebaseClientConfig;
+}
+
+// =============================================================================
+// Supabase Configuration
+// =============================================================================
+
+export interface SupabaseConfig {
+  url: string;
+  anonKey: string;
+}
+
+// =============================================================================
+// NextAuth Configuration (Optional)
+// =============================================================================
+
+export interface NextAuthConfig {
+  /** Enable NextAuth credentials sign-in after Firebase auth */
+  enabled: boolean;
+  /** Callback URL after sign-in (default: "/") */
+  callbackUrl?: string;
+}
+
+// =============================================================================
+// Main Configuration
+// =============================================================================
+
+export interface PlaywrightAuthConfig {
+  /** Authentication provider type */
+  provider: ProviderType;
+
+  /** Test user credentials */
+  testUser: TestUser;
+
+  /** Firebase-specific configuration */
   firebase?: FirebaseConfig;
 
-  /** Supabase configuration */
+  /** Supabase-specific configuration */
   supabase?: SupabaseConfig;
 
-  /** Multiple user profiles (optional) */
-  profiles?: Record<string, ProfileOverride>;
-
-  /** Debug mode */
-  debug?: boolean;
+  /** NextAuth integration (optional) */
+  nextAuth?: NextAuthConfig;
 }
 
-/** Firebase configuration */
-export interface FirebaseConfig {
-  /** Service account JSON (string) */
-  serviceAccount: string;
+// =============================================================================
+// Auth Setup Options
+// =============================================================================
 
-  /** Firebase Web API Key */
-  apiKey: string;
+export interface AuthSetupOptions {
+  /** Path to playwright.env.json configuration file */
+  configPath: string;
 
-  /** Test user's UID */
-  uid: string;
+  /** Output directory for storage state files (default: "e2e/.auth") */
+  outputDir?: string;
+
+  /** Base URL for the application */
+  baseURL?: string;
+
+  /** Storage state filename (default: "user.json") */
+  storageStateFile?: string;
 }
 
-/** Supabase configuration */
-export interface SupabaseConfig {
-  /** Supabase Project URL */
-  url: string;
+// =============================================================================
+// Auth Provider Interface
+// =============================================================================
 
-  /** Supabase Anon Key */
-  anonKey: string;
-
-  /** Test user's email address */
-  email: string;
-
-  /** Test user's password */
-  password: string;
+/**
+ * Interface that all authentication providers must implement.
+ * Each provider handles its specific authentication flow.
+ */
+export interface AuthProvider {
+  /**
+   * Execute authentication and set auth state (Cookie/Storage) in the browser context.
+   * Note: Storage state saving is handled by the caller, not within this method.
+   *
+   * @param page - Playwright Page instance
+   * @returns Promise that resolves when authentication is complete
+   */
+  signIn(page: Page): Promise<void>;
 }
 
-/** Profile override */
-export interface ProfileOverride {
-  /** Firebase: alternative UID */
+// =============================================================================
+// Sign-in Result (Internal)
+// =============================================================================
+
+export interface FirebaseSignInResult {
+  success: boolean;
   uid?: string;
-
-  /** Supabase: alternative credentials */
-  email?: string;
-  password?: string;
+  email?: string | null;
+  idToken?: string;
+  refreshToken?: string;
+  error?: string;
 }
 
-/** injectAuth options */
-export interface InjectAuthOptions {
-  /** Profile name to use */
-  profile?: string;
-
-  /** Wait time after injection (ms) default: 2000 */
-  waitAfter?: number;
-}
-
-/** Firebase REST API response */
-export interface FirebaseTokenResponse {
-  idToken: string;
-  refreshToken: string;
-  expiresIn: string;
-}
-
-/** Firebase user info (format stored in IndexedDB) */
-export interface FirebaseAuthUser {
-  uid: string;
-  email: string | null;
-  emailVerified: boolean;
-  isAnonymous: boolean;
-  providerData: ProviderUserInfo[];
-  stsTokenManager: {
-    accessToken: string;
-    refreshToken: string;
-    expirationTime: number;
-  };
-  createdAt: string;
-  lastLoginAt: string;
-  apiKey: string;
-  appName: string;
-}
-
-/** Provider user info */
-export interface ProviderUserInfo {
-  providerId: string;
-  uid: string;
-  displayName: string | null;
-  email: string | null;
-  phoneNumber: string | null;
-  photoURL: string | null;
+export interface NextAuthSignInResult {
+  success: boolean;
+  status?: number;
+  error?: string;
 }

@@ -1,110 +1,144 @@
-/**
- * playwright-auth-injector
- *
- * Skip authentication UI in Playwright E2E tests by injecting auth state directly
- */
+import { chromium } from "@playwright/test";
+import { loadConfig, ensureOutputDir } from "./utils/config-loader.js";
+import { FirebaseProvider } from "./providers/firebase.js";
+import { SupabaseProvider } from "./providers/supabase.js";
+import type { AuthProvider } from "./providers/base.js";
+import type { AuthSetupOptions, PlaywrightAuthConfig } from "./types.js";
+import * as path from "path";
 
-import type { Page } from '@playwright/test';
-import type { AuthConfig, InjectAuthOptions } from './types.js';
-import { loadConfig } from './config.js';
-import { ConfigInvalidError } from './errors.js';
-import { getProvider } from './providers/index.js';
-
-// Re-export types
+// Re-export types for library consumers
 export type {
-  AuthConfig,
+  AuthSetupOptions,
+  PlaywrightAuthConfig,
+  ProviderType,
+  TestUser,
   FirebaseConfig,
   SupabaseConfig,
-  InjectAuthOptions,
-  Provider,
-  ProfileOverride,
-} from './types.js';
+  NextAuthConfig,
+} from "./types.js";
 
-// Re-export errors
-export {
-  AuthError,
-  AuthErrorCode,
-  ConfigNotFoundError,
-  ConfigInvalidError,
-  AuthenticationError,
-  TokenExchangeError,
-  InjectionError,
-} from './errors.js';
+export type { AuthProvider } from "./providers/base.js";
+export { FirebaseProvider } from "./providers/firebase.js";
+export { SupabaseProvider } from "./providers/supabase.js";
 
 /**
- * Type-safe config helper
- *
- * @example
- * ```typescript
- * // playwright-auth.config.ts
- * import { defineConfig } from 'playwright-auth-injector';
- *
- * export default defineConfig({
- *   provider: 'firebase',
- *   firebase: {
- *     serviceAccount: process.env.FIREBASE_SERVICE_ACCOUNT!,
- *     apiKey: process.env.FIREBASE_API_KEY!,
- *     uid: process.env.TEST_USER_UID!,
- *   },
- * });
- * ```
+ * Create an authentication provider based on configuration
  */
-export function defineConfig(config: AuthConfig): AuthConfig {
-  return config;
-}
+function createProvider(config: PlaywrightAuthConfig): AuthProvider {
+  switch (config.provider) {
+    case "firebase":
+      if (!config.firebase) {
+        throw new Error("Firebase configuration is required");
+      }
+      return new FirebaseProvider(
+        config.firebase,
+        config.testUser,
+        config.nextAuth
+      );
 
-/**
- * Inject authentication state into the browser
- *
- * @param page - Playwright Page object
- * @param options - Optional settings
- * @throws AuthError - When authentication fails
- *
- * @example
- * ```typescript
- * // e2e/tests/auth.setup.ts
- * import { test as setup } from '@playwright/test';
- * import { injectAuth } from 'playwright-auth-injector';
- *
- * setup('authenticate', async ({ page }) => {
- *   await injectAuth(page);
- *   await page.context().storageState({ path: 'e2e/.auth/user.json' });
- * });
- * ```
- *
- * @example
- * ```typescript
- * // With profile
- * await injectAuth(page, { profile: 'admin' });
- * ```
- */
-export async function injectAuth(
-  page: Page,
-  options: InjectAuthOptions = {}
-): Promise<void> {
-  const config = await loadConfig();
+    case "supabase":
+      if (!config.supabase) {
+        throw new Error("Supabase configuration is required");
+      }
+      return new SupabaseProvider(config.supabase, config.testUser);
 
-  // Get provider instance
-  const provider = getProvider(config.provider);
-
-  // Get provider-specific config
-  const providerConfig = config[config.provider];
-  if (!providerConfig) {
-    throw new ConfigInvalidError(
-      `${config.provider} config is required`,
-      config.provider
-    );
+    default:
+      throw new Error(`Unknown provider: ${config.provider}`);
   }
-
-  // Apply profile override only to the active provider
-  const effectiveConfig =
-    options.profile && config.profiles?.[options.profile]
-      ? { ...providerConfig, ...config.profiles[options.profile] }
-      : providerConfig;
-
-  // Use provider's inject method
-  await provider.inject(page, effectiveConfig, {
-    debug: config.debug,
-    waitAfter: options.waitAfter,
-  });
 }
+
+/**
+ * Main authentication setup function.
+ *
+ * This function:
+ * 1. Loads configuration from the specified JSON file
+ * 2. Launches a browser and creates a new page
+ * 3. Executes authentication via the appropriate provider
+ * 4. Saves the authentication state (cookies, localStorage, IndexedDB)
+ *
+ * @example
+ * ```typescript
+ * // In global-setup.ts or auth.setup.ts
+ * import { authSetup } from 'playwright-nextjs-auth';
+ *
+ * export default async function globalSetup() {
+ *   await authSetup({
+ *     configPath: './playwright.env.json',
+ *     outputDir: 'e2e/.auth',
+ *     baseURL: 'http://localhost:3000'
+ *   });
+ * }
+ * ```
+ */
+export async function authSetup(options: AuthSetupOptions): Promise<void> {
+  const {
+    configPath,
+    outputDir = "e2e/.auth",
+    baseURL,
+    storageStateFile = "user.json",
+  } = options;
+
+  // 1. Load and validate configuration
+  console.log(`[AuthSetup] Loading configuration from: ${configPath}`);
+  const config = loadConfig(configPath);
+  console.log(`[AuthSetup] Provider: ${config.provider}`);
+
+  // 2. Ensure output directory exists
+  ensureOutputDir(outputDir);
+  const storageStatePath = path.join(outputDir, storageStateFile);
+
+  // 3. Launch browser
+  console.log("[AuthSetup] Launching browser...");
+  const browser = await chromium.launch();
+  const context = await browser.newContext({
+    baseURL,
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+
+  // 4. Create and execute provider
+  const provider = createProvider(config);
+
+  try {
+    console.log(`[AuthSetup] Starting ${config.provider} authentication...`);
+    await provider.signIn(page);
+
+    // 5. Save storage state (including IndexedDB for Firebase)
+    console.log(`[AuthSetup] Saving storage state to: ${storageStatePath}`);
+    await context.storageState({
+      path: storageStatePath,
+      indexedDB: true, // Required for Firebase
+    });
+
+    console.log("[AuthSetup] Authentication setup complete!");
+  } catch (error) {
+    console.error("[AuthSetup] Authentication failed:", error);
+    throw error;
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Create an auth provider instance for advanced use cases.
+ *
+ * Use this when you need more control over the authentication flow,
+ * such as using a custom browser context or page.
+ *
+ * @example
+ * ```typescript
+ * import { createAuthProvider, loadConfig } from 'playwright-nextjs-auth';
+ *
+ * const config = loadConfig('./playwright.env.json');
+ * const provider = createAuthProvider(config);
+ *
+ * // Use with your own page
+ * await provider.signIn(myPage);
+ * ```
+ */
+export function createAuthProvider(config: PlaywrightAuthConfig): AuthProvider {
+  return createProvider(config);
+}
+
+// Also export loadConfig for advanced usage
+export { loadConfig, ensureOutputDir } from "./utils/config-loader.js";
