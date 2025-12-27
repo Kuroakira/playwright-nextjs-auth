@@ -149,18 +149,34 @@ interface AuthSetupOptions {
 }
 ```
 
-### createAuthProvider(config)
+### createProviderFromConfigFile(configPath)
 
 Create a provider instance for advanced use cases.
 
 ```typescript
-import { createAuthProvider, loadConfig } from 'playwright-nextjs-auth';
+import { createProviderFromConfigFile } from 'playwright-nextjs-auth';
 
-const config = loadConfig('./playwright.env.json');
-const provider = createAuthProvider(config);
+// Auto-detects provider type from config
+const provider = createProviderFromConfigFile('./playwright.env.json');
 
 // Use with your own page
 await provider.signIn(myPage);
+```
+
+### Direct Provider Usage
+
+When you know the provider type, you can use the provider classes directly:
+
+```typescript
+import { FirebaseProvider, SupabaseProvider } from 'playwright-nextjs-auth';
+
+// Firebase
+const firebaseProvider = FirebaseProvider.fromConfigFile('./firebase.env.json');
+await firebaseProvider.signIn(page);
+
+// Supabase
+const supabaseProvider = SupabaseProvider.fromConfigFile('./supabase.env.json');
+await supabaseProvider.signIn(page);
 ```
 
 ### Exported Types
